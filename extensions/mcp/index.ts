@@ -331,10 +331,21 @@ async function connectServer(name: string, config: ServerConfig, pi: ExtensionAP
 }
 
 async function refreshServerCaches(server: ConnectedServer) {
-  const tools = await listAll((cursor) => server.client.listTools({ cursor } as any, { timeout: server.config.timeoutMs ?? DEFAULT_TIMEOUT_MS } as any), "tools");
+  const caps = server.client?.getServerCapabilities?.() ?? {};
+  const tools = caps.tools
+    ? await listAll((cursor) => server.client.listTools({ cursor } as any, { timeout: server.config.timeoutMs ?? DEFAULT_TIMEOUT_MS } as any), "tools")
+    : [];
   server.tools = new Map(tools.map((tool: Tool) => [tool.name, tool]));
-  try { server.resources = await listAll((cursor) => server.client.listResources({ cursor } as any), "resources"); } catch { server.resources = []; }
-  try { server.prompts = await listAll((cursor) => server.client.listPrompts({ cursor } as any), "prompts"); } catch { server.prompts = []; }
+  if (caps.resources) {
+    try { server.resources = await listAll((cursor) => server.client.listResources({ cursor } as any), "resources"); } catch { server.resources = []; }
+  } else {
+    server.resources = [];
+  }
+  if (caps.prompts) {
+    try { server.prompts = await listAll((cursor) => server.client.listPrompts({ cursor } as any), "prompts"); } catch { server.prompts = []; }
+  } else {
+    server.prompts = [];
+  }
 }
 
 async function listAll(fn: (cursor?: string) => Promise<any>, key: string) {
