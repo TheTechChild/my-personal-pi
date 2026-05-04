@@ -1,0 +1,38 @@
+{
+  "name": "my-personal-pi",
+  "version": "0.1.0",
+  "description": "Clayton's personal pi-coding-agent extensions: MCP client + web research tools.",
+  "private": true,
+  "type": "commonjs",
+  "keywords": [
+    "pi-package",
+    "mcp",
+    "model-context-protocol",
+    "web-research"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheTechChild/my-personal-pi"
+  },
+  "author": "Clayton Noyes (TheTechChild)",
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions/mcp/index.ts",
+      "./extensions/web-research/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/client": "^2.0.0-alpha.2",
+    "@mozilla/readability": "^0.6.0",
+    "cheerio": "^1.2.0",
+    "jsdom": "^29.1.1",
+    "turndown": "^7.2.4"
+  }
+}
