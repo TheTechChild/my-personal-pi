@@ -4,12 +4,7 @@
   "description": "Clayton's personal pi-coding-agent extensions: MCP client + web research tools.",
   "private": true,
   "type": "commonjs",
-  "keywords": [
-    "pi-package",
-    "mcp",
-    "model-context-protocol",
-    "web-research"
-  ],
+  "keywords": ["pi-package", "mcp", "model-context-protocol", "web-research"],
   "repository": {
     "type": "git",
     "url": "https://github.com/TheTechChild/my-personal-pi"
@@ -19,19 +14,39 @@
   "pi": {
     "extensions": [
       "./extensions/mcp/index.ts",
-      "./extensions/web-research/index.ts"
+      "./extensions/web-research/index.ts",
+      "./extensions/review-edits/index.ts"
     ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "typecheck:watch": "tsc --noEmit --watch",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "verify": "npm run typecheck && npm run check"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
     "typebox": "*"
   },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/jsdom": "^28.0.1",
+    "@types/node": "^24.3.0",
+    "@types/turndown": "^5.0.6",
+    "typescript": "^5.7.3"
+  },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@modelcontextprotocol/client": "^2.0.0-alpha.2",
     "@mozilla/readability": "^0.6.0",
     "cheerio": "^1.2.0",
+    "diff": "^9.0.0",
     "jsdom": "^29.1.1",
     "turndown": "^7.2.4"
   }

@@ -1,13 +1,13 @@
+import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "typebox";
+import { Readability } from "@mozilla/readability";
 import * as cheerio from "cheerio";
 import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
+import { Type } from "typebox";
 
 const DEFAULT_USER_AGENT =
-  process.env.WEB_RESEARCH_USER_AGENT ??
-  "Mozilla/5.0 (compatible; pi-web-research/1.0; +https://pi.dev)";
+  process.env.WEB_RESEARCH_USER_AGENT ?? "Mozilla/5.0 (compatible; pi-web-research/1.0; +https://pi.dev)";
 
 const MAX_FETCH_BYTES = Number(process.env.WEB_FETCH_MAX_BYTES ?? 5_000_000);
 const DEFAULT_FETCH_CHARS = Number(process.env.WEB_FETCH_MAX_CHARS ?? 30_000);
@@ -20,8 +20,10 @@ type SearchResult = {
   source?: string;
 };
 
-function enumSchema<T extends string[]>(values: [...T], description?: string) {
-  return Type.Union(values.map((value) => Type.Literal(value)), { description });
+// Thin wrapper around pi-ai's StringEnum to keep call sites short and preserve the
+// readonly literal-union type that downstream comparisons (e.g. `format === "json"`) need.
+function enumSchema<const T extends readonly string[]>(values: T, description?: string) {
+  return StringEnum(values, description ? { description } : undefined);
 }
 
 function domainOf(rawUrl: string): string | undefined {
@@ -49,7 +51,7 @@ function signalWithTimeout(signal: AbortSignal | undefined, timeoutMs: number): 
 function truncateText(text: string, maxChars: number) {
   if (text.length <= maxChars) return { text, truncated: false };
   return {
-    text: text.slice(0, Math.max(0, maxChars)) + `\n\n[truncated to ${maxChars} characters]`,
+    text: `${text.slice(0, Math.max(0, maxChars))}\n\n[truncated to ${maxChars} characters]`,
     truncated: true,
   };
 }
@@ -64,7 +66,12 @@ function normalizeDuckDuckGoUrl(href: string): string | undefined {
   }
 }
 
-async function braveSearch(query: string, maxResults: number, freshness: string | undefined, signal: AbortSignal | undefined) {
+async function braveSearch(
+  query: string,
+  maxResults: number,
+  freshness: string | undefined,
+  signal: AbortSignal | undefined,
+) {
   const key = process.env.BRAVE_API_KEY;
   if (!key) throw new Error("BRAVE_API_KEY is not set");
 
@@ -130,7 +137,9 @@ async function duckDuckGoSearch(query: string, maxResults: number, signal: Abort
 async function searchWeb(params: any, signal: AbortSignal | undefined) {
   const maxResults = Math.min(Math.max(Number(params.max_results ?? 8), 1), 20);
   const query = params.site ? `site:${params.site} ${params.query}` : params.query;
-  const provider = (process.env.WEB_SEARCH_PROVIDER ?? (process.env.BRAVE_API_KEY ? "brave" : "duckduckgo")).toLowerCase();
+  const provider = (
+    process.env.WEB_SEARCH_PROVIDER ?? (process.env.BRAVE_API_KEY ? "brave" : "duckduckgo")
+  ).toLowerCase();
   const requestSignal = signalWithTimeout(signal, DEFAULT_TIMEOUT_MS);
 
   if (provider === "brave") return braveSearch(query, maxResults, params.freshness, requestSignal);
@@ -139,11 +148,7 @@ async function searchWeb(params: any, signal: AbortSignal | undefined) {
 }
 
 function getMeta($: cheerio.CheerioAPI, name: string) {
-  return (
-    $(`meta[name="${name}"]`).attr("content") ??
-    $(`meta[property="og:${name}"]`).attr("content") ??
-    undefined
-  );
+  return $(`meta[name="${name}"]`).attr("content") ?? $(`meta[property="og:${name}"]`).attr("content") ?? undefined;
 }
 
 function extractLinks($: cheerio.CheerioAPI, baseUrl: string) {
@@ -254,21 +259,28 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       query: Type.String({ description: "Search query." }),
       max_results: Type.Optional(Type.Integer({ description: "Maximum results to return, 1-20. Default: 8." })),
-      freshness: Type.Optional(enumSchema(["any", "day", "week", "month", "year"], "Optional freshness filter. Supported by Brave; ignored by DuckDuckGo.")),
-      site: Type.Optional(Type.String({ description: "Restrict results to this domain, e.g. wikipedia.org or developer.mozilla.org." })),
+      freshness: Type.Optional(
+        enumSchema(
+          ["any", "day", "week", "month", "year"],
+          "Optional freshness filter. Supported by Brave; ignored by DuckDuckGo.",
+        ),
+      ),
+      site: Type.Optional(
+        Type.String({ description: "Restrict results to this domain, e.g. wikipedia.org or developer.mozilla.org." }),
+      ),
     }),
     async execute(_toolCallId, params, signal) {
       try {
         const results = await searchWeb(params, signal);
         return {
-          content: [{ type: "text", text: JSON.stringify({ query: params.query, results }, null, 2) }],
-          details: { query: params.query, results },
+          content: [{ type: "text" as const, text: JSON.stringify({ query: params.query, results }, null, 2) }],
+          details: { query: params.query, results, error: undefined as string | undefined },
         };
       } catch (error: any) {
         return {
           isError: true,
-          content: [{ type: "text", text: error?.message ?? String(error) }],
-          details: { error: error?.message ?? String(error) },
+          content: [{ type: "text" as const, text: error?.message ?? String(error) }],
+          details: { query: params.query, results: [] as SearchResult[], error: error?.message ?? String(error) },
         };
       }
     },
@@ -277,7 +289,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_fetch",
     label: "Web Fetch",
-    description: "Fetch a URL and return readable extracted content as markdown, text, HTML, or JSON with source metadata.",
+    description:
+      "Fetch a URL and return readable extracted content as markdown, text, HTML, or JSON with source metadata.",
     promptSnippet: "Fetch and extract readable content from a public URL.",
     promptGuidelines: [
       "Use web_fetch to inspect source pages before summarizing or citing them.",
@@ -287,7 +300,9 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       url: Type.String({ description: "HTTP or HTTPS URL to fetch." }),
       format: Type.Optional(enumSchema(["markdown", "text", "html", "json"], "Output format. Default: markdown.")),
-      max_chars: Type.Optional(Type.Integer({ description: `Maximum characters to return. Default: ${DEFAULT_FETCH_CHARS}.` })),
+      max_chars: Type.Optional(
+        Type.Integer({ description: `Maximum characters to return. Default: ${DEFAULT_FETCH_CHARS}.` }),
+      ),
       include_links: Type.Optional(Type.Boolean({ description: "Include up to 100 extracted links. Default: false." })),
     }),
     async execute(_toolCallId, params, signal) {
@@ -297,7 +312,10 @@ export default function (pi: ExtensionAPI) {
         const maxChars = Math.min(Math.max(Number(params.max_chars ?? DEFAULT_FETCH_CHARS), 1_000), 200_000);
         const response = await fetch(requestedUrl, {
           redirect: "follow",
-          headers: { "User-Agent": DEFAULT_USER_AGENT, Accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*" },
+          headers: {
+            "User-Agent": DEFAULT_USER_AGENT,
+            Accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",
+          },
           signal: signalWithTimeout(signal, DEFAULT_TIMEOUT_MS),
         });
 
@@ -345,14 +363,26 @@ export default function (pi: ExtensionAPI) {
 
         return {
           isError: !ok,
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-          details: result,
+          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          details: { ...result, error: undefined as string | undefined },
         };
       } catch (error: any) {
         return {
           isError: true,
-          content: [{ type: "text", text: error?.message ?? String(error) }],
-          details: { error: error?.message ?? String(error), url: params.url },
+          content: [{ type: "text" as const, text: error?.message ?? String(error) }],
+          details: {
+            url: params.url,
+            final_url: params.url,
+            status: 0,
+            ok: false,
+            content_type: "",
+            title: undefined as string | undefined,
+            description: undefined as string | undefined,
+            content: "",
+            links: undefined as Array<{ text: string; url: string }> | undefined,
+            truncated: false,
+            error: error?.message ?? (String(error) as string),
+          },
         };
       }
     },

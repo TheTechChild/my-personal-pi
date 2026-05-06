@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    // We never emit. pi loads our .ts sources directly via jiti.
+    // tsc is only used here for type-checking + editor IntelliSense.
+    "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsc/tsbuildinfo",
+
+    // Modern target. pi requires Node >=20.6, so we can use everything ES2023 ships.
+    "target": "ES2023",
+    "lib": ["ES2023"],
+
+    // Match jiti's resolution behavior: ESM-style imports without explicit .js suffixes,
+    // package self-references, conditional exports. This is the modern recommended setup
+    // when you do not emit JS yourself.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "moduleDetection": "force",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    // verbatimModuleSyntax is desirable but adds friction up front; consider enabling later
+    // once `import type { ... }` is consistent across the codebase.
+    "verbatimModuleSyntax": false,
+
+    // Strictness. Catch the kinds of bugs we just chased (stale closures, unused awaits, etc.)
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "exactOptionalPropertyTypes": false,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Interop knobs.
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+
+    // Surface dead code so we notice it locally before pi runs the file.
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+
+    "types": ["node"]
+  },
+  "include": ["extensions/**/*.ts", "mcp-wrappers/**/*.ts"],
+  "exclude": ["node_modules", "dist", "build"]
+}

@@ -14,11 +14,7 @@
     },
     "unraid": {
       "command": "uvx",
-      "args": [
-        "--from",
-        "git+https://github.com/TheTechChild/unraid-mcp",
-        "unraid-mcp"
-      ],
+      "args": ["--from", "git+https://github.com/TheTechChild/unraid-mcp", "unraid-mcp"],
       "env": {
         "UNRAID_API_URL": "http://192.168.1.152/graphql",
         "UNRAID_API_KEY": "${UNRAID_API_KEY}",
@@ -28,11 +24,7 @@
     },
     "filesystem-example": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/home/clayton/projects"
-      ]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/clayton/projects"]
     },
     "http-example": {
       "url": "https://example.com/mcp",

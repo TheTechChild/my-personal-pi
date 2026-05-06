@@ -1,0 +1,55 @@
+name: Verify
+
+# Runs `npm run verify` (tsc --noEmit + biome check) on every push to main and on
+# every pull request. This is the same script you run locally before committing.
+#
+# We test against the Node versions pi itself supports (>=20.6 per pi-coding-agent's
+# engines field). Adding more versions is cheap; drop one when pi drops it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Allow manually re-running from the Actions tab without pushing a new commit.
+  workflow_dispatch:
+
+# If a new commit lands on the same branch/PR while a previous run is still
+# going, cancel the older run. Saves CI minutes and gives faster feedback.
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default to least privilege. The job only needs to read the repo.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck + lint (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Don't bail out the whole matrix when one Node version fails; it's useful to
+      # see whether breakage is version-specific.
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` requires package-lock.json to match package.json exactly and
+        # is faster + more deterministic than `npm install` for CI.
+        run: npm ci
+
+      - name: Verify (typecheck + biome check)
+        run: npm run verify

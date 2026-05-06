@@ -8,6 +8,7 @@ that registers two extensions:
 |---|---|
 | [`extensions/mcp`](./extensions/mcp) | Connect pi to any [Model Context Protocol](https://modelcontextprotocol.io) server (stdio, HTTP, SSE) and expose its tools/resources/prompts to the LLM. |
 | [`extensions/web-research`](./extensions/web-research) | Adds `web_search` and `web_fetch` tools (Brave or DuckDuckGo + Readability/Turndown extraction). |
+| [`extensions/review-edits`](./extensions/review-edits) | Intercepts `edit`/`write` tool calls and shows them as a side-panel diff for accept/reject before they touch disk. |
 | [`mcp-wrappers/`](./mcp-wrappers) | Helper scripts referenced from `mcp.json` (e.g. `unraid-docker-wrapper.py`). Not pi extensions, just co-located so one clone brings everything. |
 
 ## Install
@@ -72,6 +73,33 @@ pi install $(pwd)         # absolute path = local install, no copy
 
 After editing `extensions/*/index.ts`, run `/reload` inside pi.
 
+### Toolchain
+
+This package uses **TypeScript** (type-check only — pi loads `.ts` sources directly via
+jiti at runtime, so we never emit JS) and **Biome** for formatting + linting.
+
+```bash
+npm run typecheck         # tsc --noEmit
+npm run typecheck:watch   # incremental, run while editing
+npm run lint              # biome lint .
+npm run lint:fix          # biome lint --write .
+npm run format            # biome format --write .
+npm run check             # biome check . (lint + format + organize imports)
+npm run check:fix         # auto-fix everything biome considers safe
+npm run verify            # tsc + biome check; run before committing
+```
+
+Config lives in [`tsconfig.json`](./tsconfig.json) and [`biome.json`](./biome.json).
+The TS config uses `module: "ESNext"` + `moduleResolution: "Bundler"` to match how
+jiti resolves imports, with `strict: true` and `noUncheckedIndexedAccess: true` enabled.
+
+### CI
+
+GitHub Actions runs `npm run verify` on every push to `main` and on every pull
+request, against Node 20 and 22 (matching pi's `engines` range). See
+[`.github/workflows/verify.yml`](./.github/workflows/verify.yml). The workflow
+can also be triggered manually from the Actions tab via `workflow_dispatch`.
+
 ## Layout
 
 ```
@@ -81,7 +109,10 @@ my-personal-pi/
 │   ├── mcp/
 │   │   ├── index.ts
 │   │   └── README.md
-│   └── web-research/
+│   ├── web-research/
+│   │   ├── index.ts
+│   │   └── README.md
+│   └── review-edits/
 │       ├── index.ts
 │       └── README.md
 ├── mcp-wrappers/
