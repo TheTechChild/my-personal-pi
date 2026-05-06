@@ -14,8 +14,7 @@
   "pi": {
     "extensions": [
       "./extensions/mcp/index.ts",
-      "./extensions/web-research/index.ts",
-      "./extensions/review-edits/index.ts"
+      "./extensions/web-research/index.ts"
     ]
   },
   "scripts": {
