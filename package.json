@@ -12,10 +12,7 @@
   "author": "Clayton Noyes (TheTechChild)",
   "license": "MIT",
   "pi": {
-    "extensions": [
-      "./extensions/mcp/index.ts",
-      "./extensions/web-research/index.ts"
-    ]
+    "extensions": ["./extensions/mcp/index.ts", "./extensions/web-research/index.ts"]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

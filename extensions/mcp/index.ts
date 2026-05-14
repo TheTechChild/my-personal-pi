@@ -14,6 +14,7 @@ import {
 import { Type } from "typebox";
 import { applyToolOverlay, registerActionHooks } from "./actions.js";
 import { clearAllMessages } from "./messages.js";
+import { createOAuthProvider, getOAuthStatus, oauthEnabled } from "./oauth.js";
 import { openMcpPanel } from "./panel.js";
 import { cleanupOldMcpBackups } from "./persist.js";
 import {
@@ -49,6 +50,11 @@ let runtimeStale = false;
 function isStaleCtxError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error ?? "");
   return msg.includes("stale after session replacement");
+}
+
+function isAuthRequiredError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error ?? "");
+  return /unauthorized|authorization required|oauth authorization required|401/i.test(msg);
 }
 
 async function discardServer(name: string, server: ConnectedServer | undefined, reason: string) {
@@ -182,10 +188,22 @@ function validateServerConfig(name: string, config: ServerConfig): ServerDiagnos
   }
 
   // HTTP server without any auth signal.
-  if (config.url && !config.bearerToken && !(config.headers && Object.keys(config.headers).length > 0)) {
+  if (
+    config.url &&
+    !config.bearerToken &&
+    !(config.headers && Object.keys(config.headers).length > 0) &&
+    !oauthEnabled(config)
+  ) {
     diagnostics.push({
       level: "info",
-      message: "http server has no bearerToken or headers configured; the server may reject requests",
+      message: "http server has no bearerToken, headers, or OAuth configured; the server may reject requests",
+    });
+  }
+
+  if (oauthEnabled(config) && (config.bearerToken || config.headers?.Authorization || config.headers?.authorization)) {
+    diagnostics.push({
+      level: "warning",
+      message: "OAuth is enabled alongside bearerToken/Authorization header; OAuth takes precedence for SDK auth",
     });
   }
 
@@ -495,7 +513,8 @@ async function connectServer(name: string, config: ServerConfig, pi: ExtensionAP
   if (config.url) {
     const headers = { ...(config.headers ?? {}) };
     let authProvider: any = undefined;
-    if (config.bearerToken) authProvider = { token: async () => expandEnvValue(config.bearerToken!) };
+    if (oauthEnabled(config)) authProvider = createOAuthProvider(name, config, { interactive: false });
+    else if (config.bearerToken) authProvider = { token: async () => expandEnvValue(config.bearerToken!) };
     transport = new StreamableHTTPClientTransport(new URL(expandEnvValue(config.url)), {
       authProvider,
       fetch: makeHeadersFetch(headers),
@@ -509,8 +528,10 @@ async function connectServer(name: string, config: ServerConfig, pi: ExtensionAP
         () => transport.close?.(),
       );
     } catch (error) {
+      if (oauthEnabled(config) && isAuthRequiredError(error)) throw error;
       if (!ENABLE_LEGACY_SSE_FALLBACK) throw error;
       transport = new SSEClientTransport(new URL(expandEnvValue(config.url)), {
+        authProvider,
         requestInit: Object.keys(headers).length ? { headers } : undefined,
       } as any);
       await withTimeout(
@@ -833,6 +854,7 @@ async function connectAndRegister(
     // the live server.
     server.source = source;
     server.diagnostics = [...staticDiagnostics];
+    if (oauthEnabled(cfg)) server.diagnostics.push({ level: "info", message: `OAuth: ${getOAuthStatus(name, cfg)}` });
     servers.set(name, server);
     registerServerTools(pi, server, [...server.tools.values()]);
     if (process.env.PI_MCP_DEBUG === "1") console.error(`[pi-mcp] Connected ${name}: ${server.tools.size} tools`);
@@ -848,6 +870,7 @@ async function connectAndRegister(
     }
     const message = error?.message ?? String(error);
     const failed = makePendingServer(name, cfg, source, staticDiagnostics, { error: message });
+    if (oauthEnabled(cfg)) failed.diagnostics.push({ level: "info", message: `OAuth: ${getOAuthStatus(name, cfg)}` });
     failed.diagnostics.push({ level: "error", message });
     servers.set(name, failed);
     console.error(`[pi-mcp] Failed to connect ${name}: ${message}`);

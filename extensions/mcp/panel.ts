@@ -48,6 +48,7 @@ import {
   showToolToggleToast,
   subscribeToMessages,
 } from "./messages.js";
+import { clearOAuthCredentials, getOAuthStatus, oauthEnabled, runInteractiveOAuthFlow } from "./oauth.js";
 import {
   type ConnectedServer,
   type ServerConfig,
@@ -213,6 +214,8 @@ function buildDetailItems(server: ConnectedServer, openToolsSubmenu: (close: () 
   items.push({ id: "_status", label: "Status", currentValue: statusValue });
 
   items.push({ id: "_transport", label: "Transport", currentValue: transportDetail(server) });
+  if (oauthEnabled(server.config))
+    items.push({ id: "_oauth", label: "OAuth", currentValue: getOAuthStatus(server.name, server.config) });
   items.push({ id: "_source", label: "Source", currentValue: collapseHomePath(server.source.file) });
   items.push({ id: "_serverInfo", label: "Server info", currentValue: serverInfoLine(server) });
   items.push({ id: "_capabilities", label: "Capabilities", currentValue: capabilitiesLine(server) });
@@ -373,7 +376,7 @@ export async function openMcpPanel(
 
     const listHint = makeHintFooter(
       () =>
-        "\u2191\u2193 navigate / focus  Enter detail  r reconnect  Shift+R reload all  t toggle  Esc clear/close   \u00b7  p/a/e/Shift+D \u2192 Phase 2",
+        "\u2191\u2193 navigate / focus  Enter detail  r reconnect  o OAuth login  O clear OAuth  Shift+R reload  t toggle  Esc close",
       theme,
     );
 
@@ -546,6 +549,22 @@ function handleListLevelKey(
     );
     return true;
   }
+  if (matchesKey(data, "o")) {
+    runAfterPanelClose(
+      closePanel,
+      () => runOAuthLogin(pi, ctx, selected),
+      () => openMcpPanel(pi, ctx, getRestore()),
+    );
+    return true;
+  }
+  if (matchesKey(data, "shift+o")) {
+    runAfterPanelClose(
+      closePanel,
+      () => runClearOAuth(pi, ctx, selected),
+      () => openMcpPanel(pi, ctx, getRestore()),
+    );
+    return true;
+  }
   if (matchesKey(data, "shift+d")) {
     runAfterPanelClose(
       closePanel,
@@ -634,6 +653,40 @@ async function runPersistTool(pi: ExtensionAPI, serverName: string, toolName: st
   showToast(result.message ?? `${serverName}/${toolName}: persisted`, "info");
 }
 
+async function runOAuthLogin(pi: ExtensionAPI, ctx: ExtensionContext, name: string): Promise<void> {
+  const server = servers.get(name);
+  if (!server) return;
+  if (!oauthEnabled(server.config)) {
+    notifyPostPanel(ctx, `${name}: OAuth is not enabled for this server`, "warning");
+    return;
+  }
+  const result = await runInteractiveOAuthFlow(name, server.config, async (authorizationUrl) => {
+    return ctx.ui.input(
+      "MCP OAuth login",
+      `Browser opened for ${name}. If the loopback callback does not complete, paste the full redirect URL or authorization code here.\n\nAuthorization URL:\n${authorizationUrl}`,
+    );
+  });
+  if (result.ok) await reconnectOne(pi, name);
+  notifyPostPanel(ctx, result.message, result.ok ? "info" : "warning");
+}
+
+async function runClearOAuth(pi: ExtensionAPI, ctx: ExtensionContext, name: string): Promise<void> {
+  const server = servers.get(name);
+  if (!server) return;
+  if (!oauthEnabled(server.config)) {
+    notifyPostPanel(ctx, `${name}: OAuth is not enabled for this server`, "warning");
+    return;
+  }
+  const ok = await ctx.ui.confirm("Clear MCP OAuth credentials?", `Clear saved OAuth credentials for ${name}?`);
+  if (!ok) {
+    notifyPostPanel(ctx, `${name}: clear OAuth cancelled`, "info");
+    return;
+  }
+  clearOAuthCredentials(name, server.config);
+  await reconnectOne(pi, name);
+  notifyPostPanel(ctx, `${name}: OAuth credentials cleared`, "info");
+}
+
 async function runEditServer(pi: ExtensionAPI, ctx: ExtensionContext, name: string): Promise<void> {
   const server = servers.get(name);
   if (!server) return;
@@ -681,6 +734,7 @@ async function runAddServer(pi: ExtensionAPI, ctx: ExtensionContext): Promise<vo
     "stdio: npx package",
     "stdio: remote via mcp-remote",
     "http: streamable HTTP",
+    "http: OAuth remote server",
     "sse: server-sent events",
     "disabled test server",
   ]);
@@ -734,6 +788,11 @@ function makeAddTemplate(template: string): ServerConfig {
       return {
         url: "https://example.com/mcp",
         headers: { Authorization: "Bearer ${EXAMPLE_TOKEN}" },
+      };
+    case "http: OAuth remote server":
+      return {
+        url: "https://example.com/mcp",
+        oauth: { enabled: true, scopes: [] },
       };
     case "sse: server-sent events":
       return {
@@ -809,7 +868,7 @@ function makeDetailComponent(
 
   const detailHint = makeHintFooter(
     () =>
-      "\u2191\u2193 navigate  Enter \u2192 manage tools  r reconnect  t toggle server  Esc back   \u00b7  p/a/e/Shift+D \u2192 Phase 2",
+      "\u2191\u2193 navigate  Enter \u2192 manage tools  r reconnect  o OAuth login  O clear OAuth  t toggle server  Esc back",
     theme,
   );
 
@@ -873,6 +932,8 @@ function makeDetailComponent(
           matchesKey(data, "p") ||
           matchesKey(data, "a") ||
           matchesKey(data, "e") ||
+          matchesKey(data, "o") ||
+          matchesKey(data, "shift+o") ||
           matchesKey(data, "shift+d") ||
           matchesKey(data, "shift+r")
         ) {
@@ -887,6 +948,18 @@ function makeDetailComponent(
             runAfterPanelClose(
               closePanel,
               () => runRemoveServer(pi, ctx, serverName),
+              () => openMcpPanel(pi, ctx, { selectedServer: serverName }),
+            );
+          else if (matchesKey(data, "o"))
+            runAfterPanelClose(
+              closePanel,
+              () => runOAuthLogin(pi, ctx, serverName),
+              () => openMcpPanel(pi, ctx, { selectedServer: serverName }),
+            );
+          else if (matchesKey(data, "shift+o"))
+            runAfterPanelClose(
+              closePanel,
+              () => runClearOAuth(pi, ctx, serverName),
               () => openMcpPanel(pi, ctx, { selectedServer: serverName }),
             );
           else if (matchesKey(data, "a"))

@@ -22,6 +22,14 @@
 // Types
 // ---------------------------------------------------------------------------
 
+export type ServerOAuthConfig = {
+  enabled?: boolean;
+  scopes?: string[];
+  clientId?: string;
+  clientSecret?: string;
+  redirectUrl?: string;
+};
+
 export type ServerConfig = {
   command?: string;
   args?: string[];
@@ -30,6 +38,7 @@ export type ServerConfig = {
   url?: string;
   headers?: Record<string, string>;
   bearerToken?: string;
+  oauth?: ServerOAuthConfig;
   disabled?: boolean;
   /** Phase 2 schema extension: tool names that should NOT be registered with pi. */
   disabledTools?: string[];
