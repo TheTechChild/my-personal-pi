@@ -1,0 +1,61 @@
+name: Sync mattpocock skills
+
+# Mirrors the engineering/, productivity/, and misc/ skill buckets from
+# upstream mattpocock/skills into ./skills, then opens a pull request if
+# anything changed. We open a PR (rather than pushing to main) so upstream
+# changes get reviewed before they land.
+#
+# Runs weekly and on demand. The actual copy logic lives in
+# scripts/sync-mattpocock-skills.sh so it can also be run locally.
+
+on:
+  schedule:
+    # Mondays at 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Upstream ref (branch/tag/commit) to sync from"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-skills
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run sync script
+        env:
+          UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'main' }}
+        run: |
+          chmod +x scripts/sync-mattpocock-skills.sh
+          scripts/sync-mattpocock-skills.sh
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: sync/mattpocock-skills
+          base: main
+          title: "chore: sync skills from mattpocock/skills"
+          commit-message: "chore: sync skills from mattpocock/skills"
+          delete-branch: true
+          body: |
+            Automated sync of the `engineering/`, `productivity/`, and `misc/`
+            skill buckets from [mattpocock/skills](https://github.com/mattpocock/skills).
+
+            Synced ref: `${{ github.event.inputs.upstream_ref || 'main' }}`
+
+            Review the diff before merging — synced buckets are overwritten
+            wholesale, so this may include upstream changes you want to adjust.
+            If `skills.json`-relevant skills were added or removed, also update
+            the manifest/README as needed.
