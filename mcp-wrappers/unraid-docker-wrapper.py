@@ -1,5 +1,8 @@
 import asyncio
+import glob
 import json
+import os
+import subprocess
 import sys
 
 import docker
@@ -42,8 +45,39 @@ def _print_schema():
     print(json.dumps(schema, indent=2))
 
 
+def _ensure_ssh_agent():
+    """Recover SSH_AUTH_SOCK when launched from an MCP host.
+
+    MCP hosts spawn stdio servers with the SDK's default env allowlist
+    (HOME, PATH, USER, ...) which excludes SSH_AUTH_SOCK. docker-py's
+    paramiko transport then can't reach the ssh-agent and falls back to
+    reading the (encrypted) key file directly, dying with
+    PasswordRequiredException -> the host reports "Connection closed".
+    Ask launchd for the login session's agent socket instead (macOS).
+    """
+    if os.environ.get("SSH_AUTH_SOCK"):
+        return
+    try:
+        out = subprocess.run(
+            ["launchctl", "getenv", "SSH_AUTH_SOCK"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        sock = out.stdout.strip()
+        if sock and os.path.exists(sock):
+            os.environ["SSH_AUTH_SOCK"] = sock
+            return
+    except Exception:  # noqa: BLE001 - best-effort recovery, fall through
+        pass
+    for candidate in glob.glob("/private/tmp/com.apple.launchd.*/Listeners"):
+        os.environ["SSH_AUTH_SOCK"] = candidate
+        return
+
+
 def main():
     _apply_schema_patch()
+    _ensure_ssh_agent()
 
     if len(sys.argv) > 1 and sys.argv[1] == "--print-schema":
         _print_schema()
