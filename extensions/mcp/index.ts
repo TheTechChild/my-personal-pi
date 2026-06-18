@@ -924,13 +924,15 @@ async function initializeFromContext(pi: ExtensionAPI, ctx: ExtensionContext) {
     // Pending servers have error="connecting" (a truthy placeholder), so we
     // check for that specific string rather than !s.error.
     //
-    // IMPORTANT: only block in non-interactive modes. In interactive ("tui")
-    // mode this `await` runs inside the awaited `session_start` handler, so it
-    // stalls *every* session creation (startup, and especially `/new`) for as
-    // long as the slowest server's handshake (e.g. unraid-docker over SSH ~3s).
-    // In interactive mode servers connect in the background and register their
-    // tools via connectAndRegister() when ready, so there is nothing to wait on.
-    if (!runtimeStale && ctx.mode !== "tui") {
+    // IMPORTANT: only block when there is no interactive UI (print/pipe, subagent).
+    // In an interactive session this `await` runs inside the awaited `session_start`
+    // handler, so it would stall *every* session creation (startup, and especially
+    // `/new`) for as long as the slowest server's handshake (e.g. unraid-docker over
+    // SSH ~3s). With a UI present, servers connect in the background and register
+    // their tools via connectAndRegister() when ready, so there is nothing to wait on.
+    // NB: gate on ctx.hasUI (not ctx.mode) — the pinned @mariozechner/pi-coding-agent
+    // types expose hasUI, and hasUI === false ≡ non-interactive (print/RPC) here.
+    if (!runtimeStale && !ctx.hasUI) {
       const isPending = (s: ConnectedServer) => s.error === "connecting" && s.tools.size === 0 && !s.config?.disabled;
       if ([...servers.values()].some(isPending)) {
         const deadline = Date.now() + 15_000;
