@@ -1,27 +1,48 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  type AuthProvider,
   type AuthResult,
   type OAuthClientInformationMixed,
   type OAuthClientMetadata,
   type OAuthClientProvider,
   type OAuthDiscoveryState,
   type OAuthTokens,
+  UnauthorizedError,
   auth,
+  extractWWWAuthenticateParams,
+  refreshAuthorization,
 } from "@modelcontextprotocol/client";
 import type { ServerConfig } from "./state.js";
 
 export const DEFAULT_OAUTH_REDIRECT_URL = "http://127.0.0.1:17631/mcp/oauth/callback";
 
 const STORE_PATH = join(homedir(), ".pi", "agent", "mcp-oauth.json");
+const LOCK_PATH = `${STORE_PATH}.lock`;
 const OAUTH_TIMEOUT_MS = Number(process.env.PI_MCP_OAUTH_TIMEOUT_MS ?? 120_000);
+const TOKEN_REFRESH_SKEW_MS = Number(process.env.PI_MCP_OAUTH_REFRESH_SKEW_MS ?? 5 * 60_000);
+const OAUTH_LOCK_TIMEOUT_MS = Number(process.env.PI_MCP_OAUTH_LOCK_TIMEOUT_MS ?? 15_000);
+const OAUTH_LOCK_STALE_MS = Number(process.env.PI_MCP_OAUTH_LOCK_STALE_MS ?? 60_000);
+const OAUTH_LOCK_HEARTBEAT_MS = Math.max(1_000, Math.floor(OAUTH_LOCK_STALE_MS / 3));
 
 type OAuthStoreRecord = {
   tokens?: OAuthTokens;
+  tokensUpdatedAt?: string;
   clientInformation?: OAuthClientInformationMixed;
   codeVerifier?: string;
   state?: string;
@@ -119,7 +140,7 @@ export function createOAuthProvider(
       return readRecord(serverName, config)?.tokens;
     },
     saveTokens(tokens) {
-      updateRecord({ tokens, authorizationUrl: undefined });
+      updateRecord({ tokens, tokensUpdatedAt: new Date().toISOString(), authorizationUrl: undefined });
     },
     async redirectToAuthorization(authorizationUrl) {
       updateRecord({ authorizationUrl: authorizationUrl.toString() });
@@ -174,6 +195,223 @@ export function createOAuthProvider(
   return provider;
 }
 
+/**
+ * Transport-facing auth provider.
+ *
+ * The MCP SDK's built-in OAuth adapter refreshes tokens only after a 401 and
+ * does not coordinate refresh-token rotation across multiple pi processes.
+ * Notion rotates refresh tokens, so two sessions refreshing at the same time
+ * can make one process save the new token while another invalidates it as
+ * `invalid_grant`. This wrapper refreshes proactively and serializes refreshes
+ * through a file lock shared by all pi sessions.
+ */
+export function createOAuthAuthProvider(serverName: string, config: ServerConfig): AuthProvider {
+  const provider = createOAuthProvider(serverName, config, { interactive: false });
+
+  return {
+    token: async () => (await getFreshTokens(serverName, config))?.access_token,
+    onUnauthorized: async (ctx) => {
+      const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(ctx.response);
+      const result = await authorizeWithLock(provider, serverName, {
+        serverUrl: ctx.serverUrl,
+        resourceMetadataUrl,
+        scope,
+        fetchFn: ctx.fetchFn,
+      });
+      if (result !== "AUTHORIZED") throw new UnauthorizedError(`OAuth authorization required for ${serverName}`);
+    },
+  };
+}
+
+export function createOAuthFetch(
+  serverName: string,
+  config: ServerConfig,
+  fetchFn: typeof fetch = fetch,
+): typeof fetch {
+  const provider = createOAuthProvider(serverName, config, { interactive: false });
+
+  return async (input, init) => {
+    const response = await fetchFn(input, init);
+    if (response.status !== 403) return response;
+
+    const { error, resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response);
+    if (error !== "insufficient_scope") return response;
+
+    await response.text().catch(() => undefined);
+    const result = await authorizeWithLock(provider, serverName, {
+      serverUrl: new URL(expandEnvValue(config.url!)),
+      resourceMetadataUrl,
+      scope,
+      fetchFn,
+    });
+    if (result !== "AUTHORIZED") throw new UnauthorizedError(`OAuth upscoping required for ${serverName}`);
+
+    const tokens = await provider.tokens();
+    const retryHeaders = new Headers(init?.headers);
+    if (tokens?.access_token) retryHeaders.set("Authorization", `Bearer ${tokens.access_token}`);
+    return fetchFn(input, { ...init, headers: retryHeaders });
+  };
+}
+
+async function authorizeWithLock(
+  provider: OAuthClientProvider,
+  serverName: string,
+  options: Parameters<typeof auth>[1],
+): Promise<AuthResult> {
+  try {
+    return await withOAuthStoreLock(() => auth(provider, options));
+  } catch (error) {
+    if (process.env.PI_MCP_DEBUG === "1") {
+      console.error(`[pi-mcp] OAuth authorization failed for ${serverName}: ${errorMessage(error)}`);
+    }
+    throw error;
+  }
+}
+
+async function getFreshTokens(serverName: string, config: ServerConfig): Promise<OAuthTokens | undefined> {
+  const record = readRecord(serverName, config);
+  if (!record?.tokens) return undefined;
+  if (!shouldRefreshTokens(record)) return record.tokens;
+
+  try {
+    return await withOAuthStoreLock(async () => {
+      const lockedRecord = readRecord(serverName, config);
+      if (!lockedRecord?.tokens) return undefined;
+      if (!shouldRefreshTokens(lockedRecord)) return lockedRecord.tokens;
+      return refreshStoredTokens(serverName, config, lockedRecord);
+    });
+  } catch (error) {
+    if (process.env.PI_MCP_DEBUG === "1") {
+      console.error(`[pi-mcp] OAuth proactive refresh failed for ${serverName}: ${errorMessage(error)}`);
+    }
+    return readRecord(serverName, config)?.tokens;
+  }
+}
+
+function shouldRefreshTokens(record: OAuthStoreRecord): boolean {
+  const expiresIn = record.tokens?.expires_in;
+  if (typeof expiresIn !== "number" || expiresIn <= 0) return false;
+  const tokensSavedAt = Date.parse(record.tokensUpdatedAt ?? record.updatedAt ?? "");
+  if (!Number.isFinite(tokensSavedAt)) return false;
+  return Date.now() + TOKEN_REFRESH_SKEW_MS >= tokensSavedAt + expiresIn * 1000;
+}
+
+async function refreshStoredTokens(
+  serverName: string,
+  config: ServerConfig,
+  record: OAuthStoreRecord,
+): Promise<OAuthTokens | undefined> {
+  const refreshToken = record.tokens?.refresh_token;
+  if (!refreshToken) return record.tokens;
+
+  const authorizationServerUrl = record.authorizationServerUrl ?? record.discoveryState?.authorizationServerUrl;
+  const clientInformation = configuredClientInformation(config) ?? record.clientInformation;
+  if (!authorizationServerUrl || !clientInformation) return record.tokens;
+
+  const resourceUrl = record.resourceUrl ?? record.discoveryState?.resourceMetadata?.resource;
+  const tokens = await refreshAuthorization(authorizationServerUrl, {
+    metadata: record.discoveryState?.authorizationServerMetadata,
+    clientInformation,
+    refreshToken,
+    resource: resourceUrl ? new URL(resourceUrl) : undefined,
+  });
+
+  const now = new Date().toISOString();
+  const store = loadStore();
+  const key = oauthRecordKey(serverName, config);
+  store.servers[key] = {
+    ...(store.servers[key] ?? {}),
+    tokens,
+    tokensUpdatedAt: now,
+    authorizationUrl: undefined,
+    updatedAt: now,
+  };
+  saveStore(store);
+  return tokens;
+}
+
+function configuredClientInformation(config: ServerConfig): OAuthClientInformationMixed | undefined {
+  const clientId = expandEnvValue(config.oauth?.clientId);
+  if (!clientId) return undefined;
+  return { client_id: clientId, client_secret: expandEnvValue(config.oauth?.clientSecret) };
+}
+
+async function withOAuthStoreLock<T>(fn: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
+  const owner = `${process.pid}:${randomBytes(8).toString("hex")}`;
+  let fd: number | undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
+
+  while (fd === undefined) {
+    try {
+      mkdirSync(dirname(STORE_PATH), { recursive: true });
+      const lockFd = openSync(LOCK_PATH, "wx", 0o600);
+      writeLockOwner(lockFd, owner);
+      fd = lockFd;
+      heartbeat = setInterval(() => touchLock(owner), OAUTH_LOCK_HEARTBEAT_MS);
+      heartbeat.unref?.();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      removeStaleLock();
+      if (Date.now() - startedAt > OAUTH_LOCK_TIMEOUT_MS) {
+        throw new Error(`Timed out waiting for MCP OAuth lock at ${LOCK_PATH}`);
+      }
+      await sleep(100 + Math.floor(Math.random() * 100));
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    try {
+      closeSync(fd);
+    } catch {}
+    removeLockIfOwner(owner);
+  }
+}
+
+function writeLockOwner(fd: number, owner: string): void {
+  writeFileSync(fd, `${owner}\n${new Date().toISOString()}\n`);
+}
+
+function readLockOwner(): string | undefined {
+  try {
+    return readFileSync(LOCK_PATH, "utf8").split("\n", 1)[0];
+  } catch {
+    return undefined;
+  }
+}
+
+function touchLock(owner: string): void {
+  if (readLockOwner() !== owner) return;
+  try {
+    writeFileSync(LOCK_PATH, `${owner}\n${new Date().toISOString()}\n`);
+  } catch {}
+}
+
+function removeLockIfOwner(owner: string): void {
+  if (readLockOwner() !== owner) return;
+  try {
+    unlinkSync(LOCK_PATH);
+  } catch {}
+}
+
+function removeStaleLock(): void {
+  try {
+    if (!existsSync(LOCK_PATH)) return;
+    if (Date.now() - statSync(LOCK_PATH).mtimeMs > OAUTH_LOCK_STALE_MS) unlinkSync(LOCK_PATH);
+  } catch {}
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function runInteractiveOAuthFlow(
   serverName: string,
   config: ServerConfig,
@@ -194,7 +432,7 @@ export async function runInteractiveOAuthFlow(
   });
 
   const scope = config.oauth?.scopes?.filter(Boolean).join(" ") || undefined;
-  const first = await auth(provider, { serverUrl, scope });
+  const first = await withOAuthStoreLock(() => auth(provider, { serverUrl, scope }));
   if (first === "AUTHORIZED") {
     callback?.close();
     return { ok: true, message: `${serverName}: already authorized` };
@@ -217,7 +455,9 @@ export async function runInteractiveOAuthFlow(
   const code = extractAuthorizationCode(codeOrUrl);
   if (!code) return { ok: false, message: `${serverName}: OAuth login cancelled or no code provided` };
 
-  const result: AuthResult = await auth(provider, { serverUrl, authorizationCode: code, scope });
+  const result: AuthResult = await withOAuthStoreLock(() =>
+    auth(provider, { serverUrl, authorizationCode: code, scope }),
+  );
   return result === "AUTHORIZED"
     ? { ok: true, message: `${serverName}: OAuth login complete` }
     : { ok: false, message: `${serverName}: OAuth did not complete authorization` };

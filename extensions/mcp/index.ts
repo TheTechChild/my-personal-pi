@@ -14,7 +14,7 @@ import {
 import { Type } from "typebox";
 import { applyToolOverlay, registerActionHooks } from "./actions.js";
 import { clearAllMessages } from "./messages.js";
-import { createOAuthProvider, getOAuthStatus, oauthEnabled } from "./oauth.js";
+import { createOAuthAuthProvider, createOAuthFetch, getOAuthStatus, oauthEnabled } from "./oauth.js";
 import { openMcpPanel } from "./panel.js";
 import { cleanupOldMcpBackups } from "./persist.js";
 import {
@@ -513,11 +513,14 @@ async function connectServer(name: string, config: ServerConfig, pi: ExtensionAP
   if (config.url) {
     const headers = { ...(config.headers ?? {}) };
     let authProvider: any = undefined;
-    if (oauthEnabled(config)) authProvider = createOAuthProvider(name, config, { interactive: false });
-    else if (config.bearerToken) authProvider = { token: async () => expandEnvValue(config.bearerToken!) };
+    let fetchFn = makeHeadersFetch(headers);
+    if (oauthEnabled(config)) {
+      authProvider = createOAuthAuthProvider(name, config);
+      fetchFn = createOAuthFetch(name, config, fetchFn ?? fetch);
+    } else if (config.bearerToken) authProvider = { token: async () => expandEnvValue(config.bearerToken!) };
     transport = new StreamableHTTPClientTransport(new URL(expandEnvValue(config.url)), {
       authProvider,
-      fetch: makeHeadersFetch(headers),
+      fetch: fetchFn,
       requestInit: Object.keys(headers).length ? { headers } : undefined,
     } as any);
     try {

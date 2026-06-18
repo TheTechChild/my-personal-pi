@@ -2,13 +2,14 @@
 
 Personal extension bundle for [pi-coding-agent](https://github.com/badlogic/pi-mono).
 Installs as a single [pi package](https://github.com/badlogic/pi-mono/blob/main/packages/pi-coding-agent/docs/packages.md)
-that registers two extensions:
+that registers extensions:
 
 | Component | Purpose |
 |---|---|
+| [`extensions/console-capture`](./extensions/console-capture) | Captures interactive-session console/stderr noise to `~/.pi/agent/pi-console.log` so extension errors don't corrupt the TUI redraw. |
 | [`extensions/mcp`](./extensions/mcp) | Connect pi to any [Model Context Protocol](https://modelcontextprotocol.io) server (stdio, HTTP, SSE) and expose its tools/resources/prompts to the LLM. |
 | [`extensions/web-research`](./extensions/web-research) | Adds `web_search` and `web_fetch` tools (Brave or DuckDuckGo + Readability/Turndown extraction). |
-| [`extensions/review-edits`](./extensions/review-edits) | Intercepts `edit`/`write` tool calls and shows them as a side-panel diff for accept/reject before they touch disk. |
+| [`extensions/review-edits`](./extensions/review-edits) | Intercepts `edit`/`write` tool calls and shows them as a side-panel diff for accept/reject before they touch disk. _(present in repo but not currently registered in `pi.extensions`)_ |
 | [`mcp-wrappers/`](./mcp-wrappers) | Helper scripts referenced from `mcp.json` (e.g. `unraid-docker-wrapper.py`). Not pi extensions, just co-located so one clone brings everything. |
 | [`skills/`](./skills) | Agent skills (slash-command behaviors) mirrored from [mattpocock/skills](https://github.com/mattpocock/skills). See [Skills](#skills) below. |
 
