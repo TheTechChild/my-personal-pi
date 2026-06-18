@@ -918,6 +918,29 @@ async function initializeFromContext(pi: ExtensionAPI, ctx: ExtensionContext) {
       void connectAndRegister(pi, name, cfg, source, staticDiagnostics);
     }
 
+    // In pipe/subagent mode, wait for initial MCP connections so tools are
+    // registered before the first turn. Interactive sessions don't need this
+    // because the user provides natural delay. We wait up to 15s total.
+    // Pending servers have error="connecting" (a truthy placeholder), so we
+    // check for that specific string rather than !s.error.
+    //
+    // IMPORTANT: only block in non-interactive modes. In interactive ("tui")
+    // mode this `await` runs inside the awaited `session_start` handler, so it
+    // stalls *every* session creation (startup, and especially `/new`) for as
+    // long as the slowest server's handshake (e.g. unraid-docker over SSH ~3s).
+    // In interactive mode servers connect in the background and register their
+    // tools via connectAndRegister() when ready, so there is nothing to wait on.
+    if (!runtimeStale && ctx.mode !== "tui") {
+      const isPending = (s: ConnectedServer) => s.error === "connecting" && s.tools.size === 0 && !s.config?.disabled;
+      if ([...servers.values()].some(isPending)) {
+        const deadline = Date.now() + 15_000;
+        while (Date.now() < deadline && !runtimeStale) {
+          if (![...servers.values()].some(isPending)) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      }
+    }
+
     // After all initial server placeholders are in place, apply session
     // overlays once. (At startup the overlays are empty, but this also
     // wires the helper to be the single point that owns pi.setActiveTools
