@@ -9,7 +9,3 @@ build/
 # tooling caches
 .cache/
 *.tsbuildinfo
-
-# Angel-internal workflow skills (infra naming, MCP tool names). Kept local so
-# they are not pushed to a personal GitHub repo. Un-ignore if this repo is private.
-skills/angel/

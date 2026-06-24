@@ -117,30 +117,36 @@ scripts/list-skills.sh                            # list all bundled skills
 > To customize a skill, copy it into a bucket that the sync script does not
 > touch (`BUCKETS` in the sync script controls which buckets are mirrored).
 
-### Angel (local, not synced)
+### Using these skills in Claude Code
 
-The `angel/` bucket holds my Angel Studios workflow skills (`deploy`,
-`start-ticket`, `linear-status`, `cleanup-worktrees`, `implement-feedback`,
-`pre-commit`, `worktrees`). They reference internal infrastructure and MCP tool
-names, so the bucket is **gitignored** and stays on this machine only — un-ignore
-it in [`.gitignore`](./.gitignore) if this repo is private.
-
-### Curated superset → Claude Code
-
-[`skills/SUPERSET.txt`](./skills/SUPERSET.txt) is the allowlist of skills I want
-exposed in Claude Code — a curated best-of across the buckets above, with the
-ones superseded by other tooling deliberately excluded.
-[`scripts/link-skills-to-claude.sh`](./scripts/link-skills-to-claude.sh) symlinks
-each listed skill folder into a Claude Code skills directory:
+The same `SKILL.md` files work in Claude Code.
+[`skills/SUPERSET.txt`](./skills/SUPERSET.txt) is the allowlist of skills to
+expose — a curated best-of across the buckets above, with the ones superseded by
+other tooling deliberately excluded. Run the one-time setup from your clone:
 
 ```bash
-scripts/link-skills-to-claude.sh                    # default ~/angel-studios/.claude/skills
-scripts/link-skills-to-claude.sh ~/.claude/skills   # link globally instead
-CLAUDE_SKILLS_DIR=/path/.claude/skills scripts/link-skills-to-claude.sh
+./scripts/setup-claude-code.sh
 ```
 
-Re-running is idempotent: current links are left alone, links no longer listed in
+It symlinks each listed skill folder into your Claude Code skills directory
+(default `~/.claude/skills`) via
+[`scripts/link-skills-to-claude.sh`](./scripts/link-skills-to-claude.sh).
+Re-running is idempotent: current links are kept, links no longer in
 `SUPERSET.txt` are pruned, and real (non-symlink) files are never overwritten.
+
+```bash
+CLAUDE_SKILLS_DIR=/custom/skills ./scripts/setup-claude-code.sh           # custom target
+./scripts/link-skills-to-claude.sh --source /path/to/repo --target /dir   # link any source
+```
+
+### Angel-internal skills (private)
+
+Angel Studios workflow skills (`deploy`, `start-ticket`, etc.) reference internal
+infrastructure, so they live in a **private** companion repo,
+[`angel-claude-skills`](https://github.com/Angel-Studios/angel-claude-skills),
+not here. `setup-claude-code.sh` auto-detects it at `$ANGEL_SKILLS_DIR`
+(default `~/angel-studios/angel-claude-skills`) and links it alongside the public
+superset. Non-Angel users just get the public set, no errors.
 
 ## Development
 
@@ -204,11 +210,11 @@ my-personal-pi/
 │   ├── engineering/           # mirrored from upstream
 │   ├── productivity/          # mirrored from upstream
 │   ├── misc/                  # mirrored from upstream
-│   ├── angel/                 # local Angel workflow skills (gitignored)
 │   └── SUPERSET.txt           # allowlist linked into Claude Code
 ├── scripts/
 │   ├── sync-mattpocock-skills.sh
-│   ├── link-skills-to-claude.sh
+│   ├── link-skills-to-claude.sh   # symlink a source's superset into Claude Code
+│   ├── setup-claude-code.sh       # one-shot: link public + private Angel skills
 │   └── list-skills.sh
 └── docs/
     └── mcp-config-example.json
