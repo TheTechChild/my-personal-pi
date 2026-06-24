@@ -1,0 +1,36 @@
+# Curated superset of skills to expose in Claude Code via
+# scripts/link-skills-to-claude.sh. One skill folder per line, relative to
+# ./skills. Blank lines and lines starting with # are ignored.
+#
+# Deliberately excluded (left on disk, just not linked):
+#   engineering/diagnose        - superpowers systematic-debugging covers it
+#   productivity/grill-me       - grill-with-docs covers it
+#   misc/scaffold-exercises     - coupled to ai-hero-cli, not relevant
+#   misc/migrate-to-shoehorn    - niche; add back if you use shoehorn
+
+# Angel workflow automation (local bucket, gitignored)
+angel/deploy
+angel/start-ticket
+angel/linear-status
+angel/cleanup-worktrees
+angel/implement-feedback
+angel/pre-commit
+angel/worktrees
+
+# Engineering discipline (mattpocock mirror)
+engineering/improve-codebase-architecture
+engineering/to-prd
+engineering/to-issues
+engineering/triage
+engineering/configure-project-for-skills
+engineering/grill-with-docs
+engineering/tdd
+engineering/zoom-out
+
+# Productivity
+productivity/caveman
+productivity/write-a-skill
+
+# Safety / setup
+misc/git-guardrails-claude-code
+misc/setup-pre-commit
