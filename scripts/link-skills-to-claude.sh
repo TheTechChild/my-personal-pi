@@ -6,7 +6,8 @@ shopt -s nullglob
 #
 # Source of truth is <source>/skills/SUPERSET.txt (one skill path per line,
 # relative to <source>/skills). Each listed skill folder is linked as
-# <target>/<skill-name> -> <source>/skills/<path>.
+# <target>/<skill-name> -> <source>/skills/<path>, stored as a RELATIVE target so the
+# links keep working when the home directory moves or the profile name changes.
 #
 # Options:
 #   --source <dir>   Repo root containing skills/SUPERSET.txt.
@@ -18,7 +19,8 @@ shopt -s nullglob
 # are no longer listed in its SUPERSET.txt are pruned, and real (non-symlink)
 # files at a target name are reported and skipped rather than overwritten.
 # Multiple sources can safely link into one target; prune only touches links
-# that point back into the current source.
+# that point back into the current source. A link stored as an absolute path from an
+# older run still counts as this source's own, and is rewritten to a relative one.
 
 SELF_REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE="$SELF_REPO"
@@ -35,7 +37,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-SOURCE="$(cd "$SOURCE" 2>/dev/null && pwd)" || { echo "error: source not found" >&2; exit 1; }
+SOURCE="$(cd "$SOURCE" 2>/dev/null && pwd -P)" || { echo "error: source not found" >&2; exit 1; }
 SKILLS_DIR="$SOURCE/skills"
 MANIFEST="$SKILLS_DIR/SUPERSET.txt"
 
@@ -45,6 +47,31 @@ if [ ! -f "$MANIFEST" ]; then
 fi
 
 mkdir -p "$TARGET"
+TARGET="$(cd "$TARGET" && pwd -P)"
+
+# Absolute path a symlink points at, resolved against the directory holding the link.
+resolve_target() {   # $1 = stored target, $2 = directory holding the link
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *)  ( cd "$2" && cd "$(dirname "$1")" 2>/dev/null \
+            && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")" ) || printf '%s\n' "$1" ;;
+  esac
+}
+
+# $1 expressed relative to directory $2. Both must be absolute.
+relative_to() {
+  local target="${1%/}" from="${2%/}" up="" rest=""
+  while [ -n "$from" ] && [ "$from" != "/" ] && [ "${target#"$from"/}" = "$target" ]; do
+    from="$(dirname "$from")"
+    up="../$up"
+  done
+  if [ -z "$from" ] || [ "$from" = "/" ]; then
+    rest="${target#/}"          # walked all the way to the root
+  else
+    rest="${target#"$from"/}"
+  fi
+  printf '%s%s\n' "$up" "$rest"
+}
 
 linked=0
 skipped=0
@@ -58,6 +85,7 @@ while IFS= read -r line || [ -n "$line" ]; do
   name="$(basename "$rel")"
   expected_names+=("$name")
   dest="$TARGET/$name"
+  link_target="$(relative_to "$src" "$TARGET")"
 
   if [ ! -d "$src" ]; then
     echo "warning: source skill not found, skipping: $rel" >&2
@@ -66,22 +94,23 @@ while IFS= read -r line || [ -n "$line" ]; do
 
   if [ -L "$dest" ]; then
     cur="$(readlink "$dest")"
-    if [ "$cur" = "$src" ]; then
+    if [ "$cur" = "$link_target" ]; then
       skipped=$((skipped + 1))
       continue
     fi
     if [ ! -e "$dest" ]; then
       # Dangling link (its target is gone); the slot is dead, claim it.
-      ln -sfn "$src" "$dest"
+      ln -sfn "$link_target" "$dest"
       echo "relinked: $name -> $rel (was broken)"
       linked=$((linked + 1))
       continue
     fi
-    # Only update a link that already points into THIS source (a stale path).
-    # A live link to a different source is someone else's; never hijack it.
-    case "$cur" in
+    # Only update a link that already points into THIS source, whether it was
+    # stored absolute or relative. A live link to another source is someone
+    # else's; never hijack it.
+    case "$(resolve_target "$cur" "$TARGET")" in
       "$SKILLS_DIR"/*)
-        ln -sfn "$src" "$dest"
+        ln -sfn "$link_target" "$dest"
         echo "relinked: $name -> $rel"
         linked=$((linked + 1))
         ;;
@@ -98,7 +127,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     continue
   fi
 
-  ln -s "$src" "$dest"
+  ln -s "$link_target" "$dest"
   echo "linked: $name -> $rel"
   linked=$((linked + 1))
 done < "$MANIFEST"
@@ -107,7 +136,7 @@ done < "$MANIFEST"
 # longer listed in its manifest. Links from other sources are left alone.
 for entry in "$TARGET"/*; do
   [ -L "$entry" ] || continue
-  case "$(readlink "$entry")" in
+  case "$(resolve_target "$(readlink "$entry")" "$TARGET")" in
     "$SKILLS_DIR"/*) ;;
     *) continue ;;
   esac
