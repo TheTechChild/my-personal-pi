@@ -76,13 +76,7 @@ upstream skills](#syncing-upstream-skills).
 ### Engineering
 
 - **[diagnose](./skills/engineering/diagnose/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions.
-- **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Grilling session that challenges your plan against the domain model and updates `CONTEXT.md`/ADRs.
-- **[triage](./skills/engineering/triage/SKILL.md)** — Triage issues through a state machine of triage roles.
-- **[improve-codebase-architecture](./skills/engineering/improve-codebase-architecture/SKILL.md)** — Find deepening opportunities in a codebase, informed by `CONTEXT.md` and `docs/adr/`.
-- **[configure-project-for-skills](./skills/engineering/configure-project-for-skills/SKILL.md)** — Scaffold the per-repo config the other engineering skills consume.
 - **[tdd](./skills/engineering/tdd/SKILL.md)** — Test-driven development with a red-green-refactor loop.
-- **[to-issues](./skills/engineering/to-issues/SKILL.md)** — Break a plan/spec/PRD into independently-grabbable GitHub issues.
-- **[to-prd](./skills/engineering/to-prd/SKILL.md)** — Turn the current conversation into a PRD and submit it as a GitHub issue.
 - **[zoom-out](./skills/engineering/zoom-out/SKILL.md)** — Get broader, higher-level context on an unfamiliar section of code.
 
 ### Productivity

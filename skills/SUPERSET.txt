@@ -5,7 +5,7 @@
 #
 # Deliberately excluded (left on disk, just not linked):
 #   engineering/diagnose        - superpowers systematic-debugging covers it
-#   productivity/grill-me       - grill-with-docs covers it
+#   productivity/grill-me       - the mattpocock-skills plugin covers it
 #   misc/scaffold-exercises     - coupled to ai-hero-cli, not relevant
 #   misc/migrate-to-shoehorn    - niche; add back if you use shoehorn
 #
@@ -13,19 +13,8 @@
 # angel-claude-skills and are linked separately by setup-claude-code.sh.
 
 # Engineering discipline (mattpocock mirror)
-engineering/improve-codebase-architecture
-engineering/to-prd
-engineering/to-issues
-engineering/triage
-engineering/configure-project-for-skills
-engineering/grill-with-docs
-engineering/tdd
 engineering/zoom-out
 
 # Productivity
-productivity/caveman
-productivity/write-a-skill
 
 # Safety / setup
-misc/git-guardrails-claude-code
-misc/setup-pre-commit
